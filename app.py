@@ -93,6 +93,24 @@ st.markdown(
     [data-testid="stSidebar"] [data-testid="stMetricValue"] div {
       color:#f8fbff !important;
     }
+    [data-testid="stSidebar"] [data-baseweb="select"] > div {
+      background:#1b2b45 !important;
+      border-color:rgba(255,255,255,.28) !important;
+    }
+    [data-testid="stSidebar"] [data-baseweb="select"] span,
+    [data-testid="stSidebar"] [data-baseweb="select"] input {
+      color:#ffffff !important;
+      -webkit-text-fill-color:#ffffff !important;
+    }
+    [data-testid="stSidebar"] [data-baseweb="select"] svg {
+      fill:#ffffff !important;
+    }
+    .active-model {
+      margin:.25rem 0 .65rem; padding:.65rem .75rem; border-radius:12px;
+      background:rgba(39,180,209,.13); border:1px solid rgba(125,227,243,.28);
+      color:#f8fbff; font-size:.88rem;
+    }
+    .active-model strong { color:#7de3f3; }
     .stButton>button, .stDownloadButton>button { border-radius:12px; font-weight:700; }
     h2, h3 { color:var(--ink); letter-spacing:-.02em; }
     </style>
@@ -259,6 +277,10 @@ with st.sidebar:
         list(trained_models),
         help="SVR es el modelo oficial porque obtuvo el menor MAE en el trabajo final.",
         label_visibility="collapsed",
+    )
+    st.markdown(
+        f'<div class="active-model">Modelo seleccionado:<br><strong>{selected_model}</strong></div>',
+        unsafe_allow_html=True,
     )
     model = trained_models[selected_model]
     model_metrics = all_model_metrics[selected_model]
