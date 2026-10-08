@@ -1,0 +1,28 @@
+Taxi trip records in a city. Goal: predict trip duration.
+
+INTENTIONAL DATA QUALITY ISSUES:
+- pickup_datetime as text (DD/MM/YYYY) — convert to datetime and engineer features
+- Missing values in trip_distance, passenger_count, weather, pickup_latitude
+- Outliers in distance, duration, passenger_count
+- passenger_count as float
+- Noise/ID columns: RecordID, FullName, Phone, ZodiacSign, FavoriteColor, Hobby
+- Redundant: trip_distance_miles vs trip_distance
+- Near-constant: VendorID
+- TARGET LEAKAGE: total_fare known after/with trip pricing — remove for pure duration prediction
+- Different scales (coords vs distance vs duration)
+
+* DATA (predictors):
+- RecordID, FullName, Phone, ZodiacSign, FavoriteColor, Hobby: irrelevant
+- pickup_datetime: Pickup timestamp as text
+- pickup_latitude, pickup_longitude: Pickup coordinates
+- dropoff_latitude, dropoff_longitude: Dropoff coordinates
+- passenger_count: Number of passengers (float for type practice)
+- trip_distance: Distance in km
+- trip_distance_miles: Distance in miles (redundant)
+- hour, day_of_week, is_weekend: Time features
+- weather: Clear / Rain / Snow / Fog
+- VendorID: Taxi vendor (near-constant)
+- total_fare: Fare amount (TARGET LEAKAGE risk — remove)
+
+* TARGET:
+- trip_duration: Trip duration in seconds (regression)

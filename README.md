@@ -36,6 +36,7 @@ streamlit run app.py
 
 - `app.py`: aplicación Streamlit.
 - `Taxi_Trip_Duration.csv`: dataset usado para entrenar el modelo.
+- `Taxi_Trip_Duration_Info.txt`: descripción de variables y problemas de calidad intencionales del dataset.
 - `Trabajo_final.ipynb`: cuaderno completo de preparación, modelamiento y evaluación.
 - `requirements.txt`: dependencias para el despliegue.
 
