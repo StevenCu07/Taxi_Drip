@@ -5,6 +5,8 @@ Aplicación interactiva de Machine Learning para predecir la duración de viajes
 ## Funcionalidades
 
 - Predicción individual con distancia, pasajeros, clima, fecha, hora y coordenadas.
+- Selector interactivo entre los ocho modelos evaluados; SVR aparece como recomendado.
+- Conversión bidireccional entre kilómetros y millas.
 - Procesamiento masivo de archivos CSV.
 - Conversión automática de kilómetros a millas.
 - Imputación segura de campos opcionales.

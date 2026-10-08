@@ -8,12 +8,17 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import BaggingRegressor, HistGradientBoostingRegressor, VotingRegressor
 from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.svm import SVR
+from sklearn.tree import DecisionTreeRegressor
 
 
 APP_DIR = Path(__file__).parent
@@ -80,6 +85,14 @@ st.markdown(
     .result-card .small { color:#d6e6ff; font-size:.9rem; }
     .soft-card { background:white; border:1px solid #e4ebf5; border-radius:18px; padding:1rem 1.15rem; }
     div[data-testid="stMetric"] { background:white; border:1px solid #e1e8f2; padding:14px 16px; border-radius:16px; }
+    [data-testid="stSidebar"] div[data-testid="stMetric"] {
+      background:rgba(255,255,255,.075); border:1px solid rgba(255,255,255,.16);
+      box-shadow:none;
+    }
+    [data-testid="stSidebar"] [data-testid="stMetricLabel"] p,
+    [data-testid="stSidebar"] [data-testid="stMetricValue"] div {
+      color:#f8fbff !important;
+    }
     .stButton>button, .stDownloadButton>button { border-radius:12px; font-weight:700; }
     h2, h3 { color:var(--ink); letter-spacing:-.02em; }
     </style>
@@ -119,12 +132,7 @@ def load_and_prepare_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     return raw, clean[MODEL_FEATURES], clean["trip_duration"]
 
 
-@st.cache_resource
-def train_model() -> tuple[Pipeline, dict[str, float | str]]:
-    _, x, y = load_and_prepare_data()
-    x_train, x_test, y_train, y_test = train_test_split(
-        x, y, test_size=0.30, random_state=42
-    )
+def build_preprocessor() -> ColumnTransformer:
     numeric_pipe = Pipeline(
         [("imputer", SimpleImputer(strategy="median")), ("scaler", StandardScaler())]
     )
@@ -134,23 +142,60 @@ def train_model() -> tuple[Pipeline, dict[str, float | str]]:
             ("onehot", OneHotEncoder(handle_unknown="ignore")),
         ]
     )
-    preprocessor = ColumnTransformer(
+    return ColumnTransformer(
         [("num", numeric_pipe, NUMERIC_FEATURES), ("cat", categorical_pipe, ["weather"])]
     )
-    pipeline = Pipeline(
-        [("preprocessor", preprocessor), ("model", SVR(C=50, epsilon=0.05, kernel="linear"))]
-    )
-    pipeline.fit(x_train, y_train)
-    prediction = pipeline.predict(x_test)
-    metrics = {
-        "mae": float(mean_absolute_error(y_test, prediction)),
-        "rmse": float(np.sqrt(mean_squared_error(y_test, prediction))),
-        "r2": float(r2_score(y_test, prediction)),
-        "training_rows": int(len(x_train)),
-        "test_rows": int(len(x_test)),
-        "model": "SVR lineal",
+
+
+def model_catalog() -> dict[str, object]:
+    return {
+        "SVR (recomendado)": SVR(C=50, epsilon=0.05, kernel="linear"),
+        "Regresión lineal": LinearRegression(),
+        "MLP": MLPRegressor(
+            hidden_layer_sizes=(100,), alpha=0.001, learning_rate_init=0.01,
+            max_iter=1000, early_stopping=True, random_state=42,
+        ),
+        "Bagging": BaggingRegressor(
+            estimator=DecisionTreeRegressor(random_state=42), n_estimators=100,
+            max_samples=0.5, max_features=1.0, random_state=42,
+        ),
+        "Voting": VotingRegressor(
+            [
+                ("lr", LinearRegression()),
+                ("tree", DecisionTreeRegressor(max_depth=5, random_state=42)),
+                ("hgb", HistGradientBoostingRegressor(random_state=42)),
+            ]
+        ),
+        "Boosting": HistGradientBoostingRegressor(
+            learning_rate=0.03, max_iter=100, max_leaf_nodes=15,
+            l2_regularization=0.1, random_state=42,
+        ),
+        "Árbol de decisión": DecisionTreeRegressor(
+            max_depth=5, min_samples_leaf=4, min_samples_split=2, random_state=42,
+        ),
+        "KNN": KNeighborsRegressor(n_neighbors=7, weights="distance", p=2),
     }
-    return pipeline, metrics
+
+
+@st.cache_resource
+def train_models() -> tuple[dict[str, Pipeline], dict[str, dict[str, float]]]:
+    _, x, y = load_and_prepare_data()
+    x_train, x_test, y_train, y_test = train_test_split(
+        x, y, test_size=0.30, random_state=42
+    )
+    trained: dict[str, Pipeline] = {}
+    metrics: dict[str, dict[str, float]] = {}
+    for name, estimator in model_catalog().items():
+        pipeline = Pipeline([("preprocessor", build_preprocessor()), ("model", estimator)])
+        pipeline.fit(x_train, y_train)
+        prediction = pipeline.predict(x_test)
+        trained[name] = pipeline
+        metrics[name] = {
+            "mae": float(mean_absolute_error(y_test, prediction)),
+            "rmse": float(np.sqrt(mean_squared_error(y_test, prediction))),
+            "r2": float(r2_score(y_test, prediction)),
+        }
+    return trained, metrics
 
 
 def seconds_to_text(seconds: float) -> str:
@@ -162,7 +207,9 @@ def seconds_to_text(seconds: float) -> str:
     return f"{minutes} min {secs} s"
 
 
-def prepare_uploaded_data(upload: pd.DataFrame, reference: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+def prepare_uploaded_data(
+    upload: pd.DataFrame, reference: pd.DataFrame
+) -> tuple[pd.DataFrame, list[str], pd.DataFrame]:
     data = upload.copy()
     notes: list[str] = []
     data.columns = data.columns.str.strip()
@@ -172,6 +219,9 @@ def prepare_uploaded_data(upload: pd.DataFrame, reference: pd.DataFrame) -> tupl
         notes.append("Se convirtió `trip_distance` de kilómetros a millas.")
     if "trip_distance_miles" not in data:
         raise ValueError("El archivo debe incluir `trip_distance_miles` o `trip_distance`.")
+    if "trip_distance" not in data:
+        data["trip_distance"] = pd.to_numeric(data["trip_distance_miles"], errors="coerce") * 1.609344
+        notes.append("Se convirtió `trip_distance_miles` de millas a kilómetros.")
 
     if "pickup_datetime" in data:
         dt = pd.to_datetime(data["pickup_datetime"], dayfirst=True, errors="coerce")
@@ -193,18 +243,29 @@ def prepare_uploaded_data(upload: pd.DataFrame, reference: pd.DataFrame) -> tupl
     for column in NUMERIC_FEATURES:
         data[column] = pd.to_numeric(data[column], errors="coerce")
     data["weather"] = data["weather"].astype("string").fillna("Desconocido")
-    return data[MODEL_FEATURES], notes
+    return data[MODEL_FEATURES], notes, data
 
 
 raw_data, model_x, model_y = load_and_prepare_data()
-model, model_metrics = train_model()
+trained_models, all_model_metrics = train_models()
 
 with st.sidebar:
     st.markdown("## 🚕 TaxiDuration AI")
     st.caption("Predicción y análisis de duración de viajes")
     st.markdown("---")
     st.markdown("**Modelo activo**")
-    st.success("SVR lineal · Validado")
+    selected_model = st.selectbox(
+        "Selecciona un modelo",
+        list(trained_models),
+        help="SVR es el modelo oficial porque obtuvo el menor MAE en el trabajo final.",
+        label_visibility="collapsed",
+    )
+    model = trained_models[selected_model]
+    model_metrics = all_model_metrics[selected_model]
+    if selected_model == "SVR (recomendado)":
+        st.success("✓ Ganador del trabajo final")
+    else:
+        st.info("Modelo alternativo para comparación")
     st.metric("MAE de referencia", f"{model_metrics['mae']:.1f} s")
     st.metric("R²", f"{model_metrics['r2']:.3f}")
     st.markdown("---")
@@ -232,7 +293,11 @@ with tab_predict:
     with st.form("single_prediction"):
         left, middle, right = st.columns(3)
         with left:
-            distance = st.number_input("Distancia estimada (millas)", min_value=0.1, max_value=100.0, value=3.0, step=0.1)
+            distance_unit = st.radio("Unidad de distancia", ["Kilómetros", "Millas"], horizontal=True)
+            if distance_unit == "Kilómetros":
+                distance = st.number_input("Distancia estimada (km)", min_value=0.1, max_value=160.9, value=4.8, step=0.1)
+            else:
+                distance = st.number_input("Distancia estimada (millas)", min_value=0.1, max_value=100.0, value=3.0, step=0.1)
             passengers = st.number_input("Número de pasajeros", min_value=1, max_value=6, value=1)
             weather = st.selectbox("Clima", WEATHER_OPTIONS)
         with middle:
@@ -248,11 +313,13 @@ with tab_predict:
 
     if submitted:
         trip_dt = datetime.combine(travel_date, travel_time)
+        distance_miles = distance / 1.609344 if distance_unit == "Kilómetros" else distance
+        distance_km = distance * 1.609344 if distance_unit == "Millas" else distance
         row = pd.DataFrame(
             [{
                 "pickup_latitude": pickup_lat, "pickup_longitude": pickup_lon,
                 "dropoff_latitude": dropoff_lat, "dropoff_longitude": dropoff_lon,
-                "passenger_count": passengers, "trip_distance_miles": distance,
+                "passenger_count": passengers, "trip_distance_miles": distance_miles,
                 "pickup_hour": trip_dt.hour, "pickup_day_of_week": trip_dt.weekday(),
                 "pickup_is_weekend": int(trip_dt.weekday() >= 5), "weather": weather,
             }]
@@ -265,13 +332,22 @@ with tab_predict:
             st.markdown(
                 f"""<div class="result-card"><div class="small">Duración estimada</div>
                 <div class="value">{seconds_to_text(estimate)}</div><div>{estimate:,.0f} segundos</div>
+                <div class="small">Distancia: {distance_km:.2f} km · {distance_miles:.2f} mi</div>
                 <div class="small" style="margin-top:.65rem">Rango orientativo: {seconds_to_text(low)} – {seconds_to_text(high)}</div></div>""",
                 unsafe_allow_html=True,
             )
         with c2:
             st.info(
-                "El rango usa el MAE del conjunto de prueba como referencia. No es un intervalo de confianza y puede variar por tráfico, incidentes o cierres viales."
+                f"Predicción generada con **{selected_model}**. El rango usa su MAE de prueba como referencia; no es un intervalo de confianza."
             )
+
+    with st.expander("↔️ Conversor rápido de distancia"):
+        convert_from = st.radio("Convertir desde", ["Kilómetros", "Millas"], horizontal=True, key="converter_unit")
+        convert_value = st.number_input("Valor", min_value=0.0, value=10.0, step=0.1, key="converter_value")
+        if convert_from == "Kilómetros":
+            st.markdown(f"**{convert_value:.2f} km = {convert_value / 1.609344:.2f} millas**")
+        else:
+            st.markdown(f"**{convert_value:.2f} millas = {convert_value * 1.609344:.2f} km**")
 
 with tab_batch:
     st.subheader("Predicción masiva y comparación")
@@ -297,11 +373,11 @@ with tab_batch:
     if uploaded is not None:
         try:
             uploaded_df = pd.read_csv(uploaded)
-            prepared, preparation_notes = prepare_uploaded_data(uploaded_df, model_x)
-            output = uploaded_df.copy()
+            prepared, preparation_notes, output = prepare_uploaded_data(uploaded_df, model_x)
             output["predicted_trip_duration"] = model.predict(prepared)
             output["predicted_duration_minutes"] = output["predicted_trip_duration"] / 60
             st.success(f"Archivo procesado correctamente: {len(output):,} registros.")
+            st.caption(f"Predicciones generadas con: **{selected_model}**")
             for note in preparation_notes:
                 st.caption("• " + note)
 
@@ -369,7 +445,7 @@ with tab_model:
         "El flujo aplica CRISP-DM: selección por conocimiento del negocio, limpieza de errores, ingeniería temporal, preprocesamiento sin fuga de información, validación cruzada y evaluación independiente."
     )
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Modelo ganador", "SVR")
+    m1.metric("Modelo seleccionado", selected_model.replace(" (recomendado)", ""))
     m2.metric("MAE", f"{model_metrics['mae']:.2f} s")
     m3.metric("RMSE", f"{model_metrics['rmse']:.2f} s")
     m4.metric("R²", f"{model_metrics['r2']:.4f}")
@@ -381,6 +457,11 @@ with tab_model:
     )
     fig.update_coloraxes(showscale=False)
     st.plotly_chart(fig, width="stretch")
+
+    st.info(
+        "SVR permanece como modelo oficial del trabajo porque logró el menor MAE. "
+        "El selector lateral permite usar los otros siete modelos con fines comparativos, sin cambiar la conclusión académica."
+    )
 
     col_a, col_b = st.columns(2)
     with col_a:
